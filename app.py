@@ -60,8 +60,47 @@ app.add_middleware(
 # Serve static files
 app.mount("/static", StaticFiles(directory=str(STATIC_ROOT)), name="static")
 
-# Run (if __main__)
 # ---------------------------
+# Database setup (SQLAlchemy 2.x Async)
+# ---------------------------
+# So that all classes inheriting from Base have a common metadata registry (Base.metadata.create_all() creates all tables in the database at once)
+# Tracks table metadata, provides python object conversion into dbs, can create tables from models, provides query methods
+class Base(DeclarativeBase):
+    pass
+
+class Comparison(Base):
+    __tablename__ = "comparisons"
+
+    # Object relational mapping so that rows/columns in the database are mapped to python objects and vice versa
+    # 36 char hex UUID primary key, e.g., 0123456789abcdef0123456789abcdef
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    correlation_score: Mapped[float] = mapped_column(Float, nullable=False)
+    chi_square_score: Mapped[float] = mapped_column(Float, nullable=False)
+    bhattacharyya_score: Mapped[float] = mapped_column(Float, nullable=False)
+    diff_image_path: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+
+# Create async database engine - handles connection pool to PostgreSQL
+# echo=False: don't print SQL queries to console 
+# future=True: enables SQLAlchemy 2.x features
+# Concurrent database operations running at the same time as web server operations
+# Brides the python code to the database
+engine = create_async_engine(DATABASE_URL, echo=False, future=True)
+
+# Create session factory - generates database sessions for each request
+# expire_on_commit=False: keeps objects accessible after commit
+# class_=AsyncSession: uses async session for non-blocking database operations
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+# Pydantic scheme for the API response (copy of Comparison but with url instead of path)
+class ComparisonResponse(BaseModel):
+    id: str
+    correlation: float = Field(..., ge=0, le=100)
+    chi_square: float = Field(..., ge=0, le=100)
+    bhattacharyya: float = Field(..., ge=0, le=100)
+    diff_image_url: str
+    created_at: datetime
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
