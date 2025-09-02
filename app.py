@@ -36,10 +36,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 
 from dotenv import load_dotenv
 
-# ---------------------------
-# Config
-# ---------------------------
-
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/image_diff")
@@ -97,36 +93,6 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSe
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-def test_database_initialization():
-    """Test the init_db function to ensure database tables are created."""
-    try:
-        # Test the database initialization logic
-        # Since init_db is async and we can't use asyncio.run() in uvicorn's event loop,
-        # we'll test the core logic by checking if the metadata exists and is valid
-        
-        # Check that Base.metadata exists and has our Comparison table
-        if hasattr(Base, 'metadata') and Base.metadata is not None:
-            print(f"✅ Database metadata exists")
-            
-            # Check if our Comparison table is registered
-            if 'comparisons' in Base.metadata.tables:
-                print(f"✅ Comparison table is registered in metadata")
-                table = Base.metadata.tables['comparisons']
-                print(f"   Table name: {table.name}")
-                print(f"   Columns: {list(table.columns.keys())}")
-                return True
-            else:
-                print(f"❌ Comparison table not found in metadata")
-                print(f"   Available tables: {list(Base.metadata.tables.keys())}")
-                return False
-        else:
-            print(f"❌ Database metadata is None or missing")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Database initialization test failed: {e}")
-        return False
 
 # Pydantic scheme for the API response (copy of Comparison but with url instead of path)
 class ComparisonResponse(BaseModel):
@@ -207,194 +173,309 @@ def _ensure_same_size(img1: np.ndarray, img2: np.ndarray) -> tuple[np.ndarray, n
         if (h1, w1) == (h2, w2):
             return img1, img2
         
-        # Resize img2 to match img1's dimensions
+        # Calculate total pixels for each image to determine which is larger
+        pixels1 = h1 * w1
+        pixels2 = h2 * w2
+
+        result: tuple[np.ndarray, np.ndarray] | None = None
+        
         try:
-          resized = cv2.resize(img2, (w1, h1), interpolation=cv2.INTER_AREA)
+            if pixels1 > pixels2:
+                # img1 is larger, resize it to match img2 (downsample for better quality)
+                resized_img1 = cv2.resize(img1, (w2, h2), interpolation=cv2.INTER_AREA)
+                # Validate resize result
+                if resized_img1 is None:
+                    raise RuntimeError("cv2.resize returned None")
+                result = (resized_img1, img2)
+            else:
+                # img2 is larger, resize it to match img1 (downsample for better quality)
+                resized_img2 = cv2.resize(img2, (w1, h1), interpolation=cv2.INTER_AREA)
+                # Validate resize result
+                if resized_img2 is None:
+                    raise RuntimeError("cv2.resize returned None")
+                result = (img1, resized_img2)
         except Exception as e:
             raise RuntimeError(f"Error in cv2.resize: {e}")
         
-        # Validate resize result
-        if resized is None:
-            raise RuntimeError("cv2.resize returned None")
-        
-        return img1, resized
+        return result
         
     except Exception as e:
         raise RuntimeError(f"Error in _ensure_same_size: {e}")
 
 def _compute_channel_hist(bgr_img: np.ndarray, channel_index: int, bins: int = 256) -> np.ndarray:
     """Compute histogram for a specific channel of a BGR image."""
-    hist = cv2.calcHist([bgr_img], [channel_index], None, [bins], [0, 256])
+    try:
+      hist = cv2.calcHist([bgr_img], [channel_index], None, [bins], [0, 256])
+    except Exception as e:
+        raise RuntimeError(f"Error in cv2.calcHist: {e}")
     # L1 normalize to sum to 1
-    hist = cv2.normalize(hist, None, alpha=1.0, norm_type=cv2.NORM_L1).flatten()
+    try:
+      hist = cv2.normalize(hist, None, alpha=1.0, norm_type=cv2.NORM_L1).flatten()
+    except Exception as e:
+      raise RuntimeError(f"Error in cv2.normalize: {e}")
     return hist
 
 def _compare_histograms_per_method(h1: np.ndarray, h2: np.ndarray) -> dict:
     """Return raw OpenCV scores for each method on two 1D hist arrays."""
-    # Correlation: higher is more similar (1 identical, -1 opposite)
-    corr = float(cv2.compareHist(h1.astype("float32"), h2.astype("float32"), cv2.HISTCMP_CORREL))
-    # Chi-Square: 0 identical, unbounded positive otherwise
-    chi = float(cv2.compareHist(h1.astype("float32"), h2.astype("float32"), cv2.HISTCMP_CHISQR))
-    # Bhattacharyya distance: 0 identical, 1 very different (when L1 normalized)
-    bha = float(cv2.compareHist(h1.astype("float32"), h2.astype("float32"), cv2.HISTCMP_BHATTACHARYYA))
-    return {"corr": corr, "chi": chi, "bha": bha}
-
-def test_channel_histogram():
-    """Test the _compute_channel_hist function with image1.png."""
-    
     try:
-        # Block 1: Read and process image1.png
-        try:
-            with open("image1.png", "rb") as f:
-                image_data = f.read()
-            print(f"✅ Image reading successful: {len(image_data)} bytes")
-            
-            # Convert to numpy array
-            upload_file = UploadFile(file=io.BytesIO(image_data), filename="image1.png")
-            img = _read_image_to_bgr(upload_file)
-            print(f"✅ Image processing successful: shape {img.shape}")
-            
-        except Exception as e:
-            print(f"❌ Image processing failed: {e}")
-            return None
+        # Validate input histograms
+        if h1 is None or h2 is None:
+            raise ValueError("One or both histograms are None")
         
-        # Block 2: Test histogram computation for each channel
+        if len(h1.shape) != 1 or len(h2.shape) != 1:
+            raise ValueError("Histograms must be 1D arrays")
+        
+        if h1.shape[0] != h2.shape[0]:
+            raise ValueError(f"Histograms must have same length: {h1.shape[0]} vs {h2.shape[0]}")
+        
+        # Convert to float32 for OpenCV compatibility
+        h1_float = h1.astype("float32")
+        h2_float = h2.astype("float32")
+        
         try:
-            # Test Blue channel (index 0)
-            blue_hist = _compute_channel_hist(img, 0)
-            print(f"✅ Blue channel histogram computed: shape {blue_hist.shape}, sum={blue_hist.sum():.6f}")
-            
-            # Test Green channel (index 1)
-            green_hist = _compute_channel_hist(img, 1)
-            print(f"✅ Green channel histogram computed: shape {green_hist.shape}, sum={green_hist.sum():.6f}")
-            
-            # Test Red channel (index 2)
-            red_hist = _compute_channel_hist(img, 2)
-            print(f"✅ Red channel histogram computed: shape {red_hist.shape}, sum={red_hist.sum():.6f}")
-            
-            # Validate histograms
-            print(f"✅ Histogram validation:")
-            print(f"   All histograms have 256 bins: {all(h.shape[0] == 256 for h in [blue_hist, green_hist, red_hist])}")
-            print(f"   All histograms sum to 1.0: {all(abs(h.sum() - 1.0) < 1e-6 for h in [blue_hist, green_hist, red_hist])}")
-            print(f"   All values are non-negative: {all((h >= 0).all() for h in [blue_hist, green_hist, red_hist])}")
-            
-            # Show some statistics
-            print(f"   Blue channel - min: {blue_hist.min():.6f}, max: {blue_hist.max():.6f}")
-            print(f"   Green channel - min: {green_hist.min():.6f}, max: {green_hist.max():.6f}")
-            print(f"   Red channel - min: {red_hist.min():.6f}, max: {red_hist.max():.6f}")
-            
-            return True
-            
+            corr = float(cv2.compareHist(h1_float, h2_float, cv2.HISTCMP_CORREL))
         except Exception as e:
-            print(f"❌ Histogram computation failed: {e}")
-            return None
+            raise RuntimeError(f"Error computing correlation: {e}")
+        
+        try:
+            chi = float(cv2.compareHist(h1_float, h2_float, cv2.HISTCMP_CHISQR))
+        except Exception as e:
+            raise RuntimeError(f"Error computing chi-square: {e}")
+        
+        # Bhattacharyya distance: 0 identical, 1 very different (when L1 normalized)
+        # Represents a notion of similarity between two probability distributions.
+        try:
+            bha = float(cv2.compareHist(h1_float, h2_float, cv2.HISTCMP_BHATTACHARYYA))
+        except Exception as e:
+            raise RuntimeError(f"Error computing Bhattacharyya: {e}")
+        
+        return {"corr": corr, "chi": chi, "bha": bha}
         
     except Exception as e:
-        print(f"❌ Overall test failed: {e}")
-        return None
+        raise RuntimeError(f"Error in _compare_histograms_per_method: {e}")
 
-def test_image_reading():
-    """Test the _read_image_to_bgr function with a real image file."""
+def _find_difference_regions(img1: np.ndarray, img2: np.ndarray, threshold: float = 60.0, min_region_size: int = 50) -> dict:
+    """
+    Find spatial regions where images differ significantly.
+    Returns information about connected regions of difference.
+    """
+    if img1.shape != img2.shape:
+        raise ValueError(f"Images must have the same shape: {img1.shape} vs {img2.shape}")
     
+    # Calculate absolute difference for each pixel
+    if img1 is None or img2 is None:
+        raise ValueError("Images are None")
     try:
-        try:
-            with open("image1.png", "rb") as f:
-                image_data = f.read()
-            print(f"✅ File reading successful: {len(image_data)} bytes")
-        except Exception as e:
-            print(f"❌ File reading failed: {e}")
-            return None
+      diff = np.abs(img1.astype(np.float32) - img2.astype(np.float32))
+    except Exception as e:
+        raise RuntimeError(f"Error in calculating the absolute pixel difference: {e}")
+    
+    # Calculate total difference per pixel (sum across all channels)
+    try:
+      pixel_diffs = np.sum(diff, axis=2)
+    except Exception as e:
+        raise RuntimeError(f"Error in calculating the total pixel difference: {e}")
+    
+    # Create binary mask for significant differences
+    try:
+      diff_mask = pixel_diffs > threshold
+    except Exception as e:
+        raise RuntimeError(f"Error in creating the binary mask for significant differences: {e}")
+    
+    # Find connected components (regions) for pixels P with binary value 1 in mask, connect diagonal and adjacent for better fragmentation.
+    # Think minesweeper!
+    # X X X
+    # X P X
+    # X X X
+    # num_labels is the number of connected components, labels is a matrix of pixels with 0 for not above threshold, and then 1, 2, 3, etc. for each connected component.
+    # 0 0 0 0 0 0 0
+    # 0 1 1 0 0 0 0
+    # 0 1 1 0 0 2 0
+    # 0 0 0 0 0 2 0
+    # 0 0 0 2 2 2 0
+    # 0 0 0 2 2 0 0
+    # 0 0 0 0 0 0 0
+    # Stats contains the left-top corner coordinate of the connected region, width, height, and area.
+    # Centroids contains the centroid of the connected region.
+    try:
+      num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+          diff_mask.astype(np.uint8), connectivity=8
+      )
+    except Exception as e:
+        raise RuntimeError(f"Error in finding connected components: {e}")
+    
+    significant_regions : list[dict[str, Any]] = []
+    
+    if num_labels is None or num_labels <= 0:
+        raise ValueError("Number of labels is None or less than 0")
+    # Start from 1 to ignore below threshold pixels
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] is None or stats[i, cv2.CC_STAT_AREA] <= 0:
+            raise ValueError(f"Region size is None or less than 0 for label {i}")
+        region_size = stats[i, cv2.CC_STAT_AREA]
+        if region_size >= min_region_size:
+            if stats[i, cv2.CC_STAT_LEFT] is None or stats[i, cv2.CC_STAT_TOP] is None or stats[i, cv2.CC_STAT_WIDTH] is None or stats[i, cv2.CC_STAT_HEIGHT] is None:
+                raise ValueError(f"Region coordinates are None for label {i}")
+            x = stats[i, cv2.CC_STAT_LEFT]
+            y = stats[i, cv2.CC_STAT_TOP]
+            w = stats[i, cv2.CC_STAT_WIDTH]
+            h = stats[i, cv2.CC_STAT_HEIGHT]
+            
+            try:
+              cx, cy = centroids[i]
+            except Exception as e:
+                raise RuntimeError(f"Error in getting centroid for label {i}: {e}")
+            
+            # Calculate average difference between pixels in this region
+            region_mask = (labels == i)
+            try:
+              avg_diff = np.mean(pixel_diffs[region_mask])
+            except Exception as e:
+              raise RuntimeError(f"Error in calculating average difference for label {i}: {e}")
+            try:
+              max_diff = np.max(pixel_diffs[region_mask])
+            except Exception as e:
+              raise RuntimeError(f"Error in calculating max difference for label {i}: {e}")
+            
+            significant_regions.append({
+                'id': i,
+                'size': region_size,
+                'bbox': (x, y, w, h),
+                'centroid': (cx, cy),
+                'avg_difference': avg_diff,
+                'max_difference': max_diff,
+                'mask': region_mask
+            })
+    
+    # Sort by region size (largest first)
+    significant_regions.sort(key=lambda x: x.get('size', 0), reverse=True)
+    
+    return {
+        'total_regions': len(significant_regions),
+        'regions': significant_regions,
+        'threshold': threshold,
+        'total_different_pixels': np.sum(diff_mask),
+        'total_pixels': diff_mask.size,
+        'difference_percentage': (np.sum(diff_mask) / diff_mask.size) * 100
+    }
+
+def _create_difference_visualization(img1: np.ndarray, img2: np.ndarray, regions_info: dict) -> np.ndarray:
+    """
+    Create a visualization showing the difference regions overlaid on the original image.
+    """
+
+    # Start with a copy of the first image
+    vis_img = img1.copy()
+    
+    # Create a colored overlay for difference regions
+    overlay = np.zeros_like(img1)
+    
+    # Color each region differently
+    colors = [
+        (0, 255, 255),    # Yellow
+        (255, 0, 255),    # Magenta  
+        (0, 255, 0),      # Green
+        (255, 255, 0),    # Cyan
+        (255, 0, 0),      # Blue
+        (0, 0, 255),      # Red
+        (255, 128, 0),    # Orange
+        (128, 0, 255),    # Purple
+        (0, 128, 255),    # Light Blue
+        (255, 0, 128),    # Pink
+        (128, 255, 0),    # Lime
+        (255, 255, 255),  # White
+    ]
+    
+    regions = regions_info.get('regions')
+    if regions is None:
+        raise ValueError("Missing 'regions' key in regions_info")
+    
+    max_regions = min(12, len(regions))
+    
+    for i, region in enumerate(regions[:max_regions]):
+        color = colors[i % len(colors)]
+        mask = region.get('mask')
+        if mask is None:
+            raise ValueError(f"Missing 'mask' key in region {i}")
+        overlay[mask] = color
+    
+    # Blend the overlay with the original image
+    alpha = 0.3  # Transparency
+    # result = src1 * 1-alpha + src2 * alpha + gamma
+    # No brightness adjustment (0)
+    vis_img = cv2.addWeighted(vis_img, 1-alpha, overlay, alpha, 0)
+    
+    # Draw bounding boxes and labels
+    for i, region in enumerate(regions[:max_regions]):
+        bbox = region.get('bbox')
+        if bbox is None:
+            raise ValueError(f"Missing 'bbox' key in region {i}")
+        x, y, w, h = bbox
         
-        try:
-            upload_file = UploadFile(
-                file=io.BytesIO(image_data),
-                filename="image1.png"
-            )
-            print(f"✅ UploadFile creation successful: {upload_file.filename}")
-        except Exception as e:
-            print(f"❌ UploadFile creation failed: {e}")
-            return None
+        centroid = region.get('centroid')
+        if centroid is None:
+            raise ValueError(f"Missing 'centroid' key in region {i}")
+        cx, cy = centroid
         
+        cv2.rectangle(vis_img, (x, y), (x+w, y+h), colors[i % len(colors)], 2)
+        
+        size = region.get('size')
+        if size is None:
+            raise ValueError(f"Missing 'size' key in region {i}")
+        label = f"R{i+1}: {size}px"
+        # Label region by ranking
+        cv2.putText(vis_img, label, (int(cx-30), int(cy)), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, colors[i % len(colors)], 1)
+    
+    return vis_img
+
+
+def build_diff_url(diff_path: Path) -> str:
+    """
+    Build a URL for a difference image file relative to the static mount.
+    
+    Args:
+        diff_path: Path to the difference image file
+        
+    Returns:
+        URL string relative to /static mount (e.g., "/static/diffs/image.png")
+        
+    Raises:
+        ValueError: If diff_path is not a valid Path object
+    """
+    try:
+        # Ensure we have a Path object
+        if not isinstance(diff_path, Path):
+            diff_path = Path(diff_path)
+        
+        # Try to get relative path from STATIC_ROOT
         try:
-            img = _read_image_to_bgr(upload_file)
-            print(f"✅ Image processing successful!")
-            print(f"   Image shape: {img.shape}")
-            print(f"   Image dtype: {img.dtype}")
-            print(f"   Image size: {len(image_data)} bytes")
-            print(f"   Filename: {upload_file.filename}")
-            return img
-        except Exception as e:
-            print(f"❌ Image processing failed: {e}")
-            return None
+            rel = diff_path.relative_to(STATIC_ROOT)
+            # Convert to posix-style path and build URL
+            return f"/static/{rel.as_posix()}"
+        except ValueError:
+            # If outside static root, just return filename (not expected in normal operation)
+            return f"/static/{diff_path.name}"
         
     except Exception as e:
-        print(f"❌ Overall test failed: {e}")
-        return None
+        raise ValueError(f"Failed to build diff URL for path {diff_path}: {e}")
 
-# Test the _ensure_same_size function with both images
-def test_image_size_normalization():
-    """Test the _ensure_same_size function with image1.png and image2.png."""
-    
-    try:
-        # Block 1: Read image1.png
-        try:
-            with open("image1.png", "rb") as f:
-                image1_data = f.read()
-            print(f"✅ Image1 reading successful: {len(image1_data)} bytes")
-        except Exception as e:
-            print(f"❌ Image1 reading failed: {e}")
-            return None
-        
-        # Block 2: Read image2.png
-        try:
-            with open("image2.png", "rb") as f:
-                image2_data = f.read()
-            print(f"✅ Image2 reading successful: {len(image2_data)} bytes")
-        except Exception as e:
-            print(f"❌ Image2 reading failed: {e}")
-            return None
-        
-        # Block 3: Convert both to numpy arrays using _read_image_to_bgr logic
-        try:
-            # Convert image1
-            upload_file1 = UploadFile(file=io.BytesIO(image1_data), filename="image1.png")
-            img1 = _read_image_to_bgr(upload_file1)
-            print(f"✅ Image1 processing successful: shape {img1.shape}")
-            
-            # Convert image2
-            upload_file2 = UploadFile(file=io.BytesIO(image2_data), filename="image2.png")
-            img2 = _read_image_to_bgr(upload_file2)
-            print(f"✅ Image2 processing successful: shape {img2.shape}")
-            
-        except Exception as e:
-            print(f"❌ Image processing failed: {e}")
-            return None
-        
-        # Block 4: Test _ensure_same_size function
-        try:
-            img1_resized, img2_resized = _ensure_same_size(img1, img2)
-            print(f"✅ Size normalization successful!")
-            print(f"   Original img1 shape: {img1.shape}")
-            print(f"   Original img2 shape: {img2.shape}")
-            print(f"   Resized img1 shape: {img1_resized.shape}")
-            print(f"   Resized img2 shape: {img2_resized.shape}")
-            print(f"   Images now have same dimensions: {img1_resized.shape == img2_resized.shape}")
-            return True
-            
-        except Exception as e:
-            print(f"❌ Size normalization failed: {e}")
-            return None
-        
-    except Exception as e:
-        print(f"❌ Overall test failed: {e}")
-        return None
-
-test_database_initialization()
-test_image_reading()
-test_image_size_normalization()
-test_channel_histogram()
 
 # API Endpoints
+@app.on_event("startup")
+async def on_startup():
+    """
+    Initialize database on server startup.
+    This ensures the database tables are created before the server starts accepting requests.
+    """
+    try:
+        await init_db()
+        print("✅ Database initialized successfully")
+    except Exception as e:
+        print(f"❌ Database initialization failed: {e}")
+        print("⚠️  Server will start but database operations may fail")
+
+
 # Test at http://localhost:8000/health
 @app.get("/health")
 async def health():
@@ -407,6 +488,135 @@ async def health():
     except Exception as e:
         db = f"error: {e}"
     return {"status": "ok", "db": db}
+
+# Test with curl -X POST "http://localhost:8000/comparison" -F "file1=@image1.png" -F "file2=@image2.png"
+@app.post("/comparison", response_model=ComparisonResponse)
+async def create_comparison(file1: UploadFile = File(...), file2: UploadFile = File(...)):
+    """
+    Compare two images and return similarity scores with a difference visualization.
+    
+    Args:
+        file1: First image file (UploadFile)
+        file2: Second image file (UploadFile)
+        
+    Returns:
+        ComparisonResponse with similarity scores and difference image URL
+        
+    Raises:
+        HTTPException: If image processing or database operations fail
+    """
+    try:
+        comp_id = str(uuid.uuid4())
+        created_at = datetime.now(timezone.utc)
+        
+        print(f"🔄 Processing comparison {comp_id}...")
+        img1 = _read_image_to_bgr(file1)
+        img2 = _read_image_to_bgr(file2)
+        
+        img1, img2 = _ensure_same_size(img1, img2)
+        print(f"✅ Images processed: {img1.shape}")
+        
+        # Blue channel comparison
+        hist1 = _compute_channel_hist(img1, 0) 
+        hist2 = _compute_channel_hist(img2, 0)  
+        scores = _compare_histograms_per_method(hist1, hist2)
+        
+        correlation_score = scores.get('corr')
+        chi_square_score = scores.get('chi')
+        bhattacharyya_score = scores.get('bha')
+        
+        if correlation_score is None or chi_square_score is None or bhattacharyya_score is None:
+            raise HTTPException(status_code=500, detail="Failed to compute histogram similarity scores")
+        
+        print(f"✅ Histogram scores computed: corr={correlation_score:.6f}, chi={chi_square_score:.6f}, bha={bhattacharyya_score:.6f}")
+        
+        # Convert scores to percentages for storage and response (except chi-square which is a distance metric)
+        correlation_percent = correlation_score * 100
+        bhattacharyya_percent = bhattacharyya_score * 100
+        
+        print(f"✅ Scores converted: corr={correlation_percent:.2f}%, chi={chi_square_score:.6f} (distance), bha={bhattacharyya_percent:.2f}%")
+        
+        # Find difference regions and create visualization
+        regions_info = _find_difference_regions(img1, img2, threshold=50.0, min_region_size=50)
+        diff_img = _create_difference_visualization(img1, img2, regions_info)
+        
+        diff_filename = f"comparison_{comp_id}.png"
+        diff_path = DIFF_DIR / diff_filename
+        
+        DIFF_DIR.mkdir(parents=True, exist_ok=True)
+        
+        success = cv2.imwrite(str(diff_path), diff_img)
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to save difference image to {diff_path}")
+        
+        print(f"✅ Difference image saved: {diff_path}")
+        
+        async with SessionLocal() as session:
+            entity = Comparison(
+                id=comp_id,
+                correlation_score=correlation_percent,
+                chi_square_score=chi_square_score,
+                bhattacharyya_score=bhattacharyya_percent,
+                diff_image_path=str(diff_path),
+                created_at=created_at,
+            )
+            session.add(entity)
+            await session.commit()
+        
+        print(f"✅ Comparison saved to database: {comp_id}")
+        
+        # Return response
+        return ComparisonResponse(
+            id=comp_id,
+            correlation=correlation_percent,
+            chi_square=chi_square_score,
+            bhattacharyya=bhattacharyya_percent,
+            diff_image_url=build_diff_url(diff_path),
+            created_at=created_at,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Comparison failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Image comparison failed: {str(e)}")
+
+# Test with curl "http://localhost:8000/comparison/{comp_id}" after posting a comparison
+@app.get("/comparison/{comp_id}", response_model=ComparisonResponse)
+async def get_comparison(comp_id: str):
+    """
+    Retrieve a comparison by its ID.
+    
+    Args:
+        comp_id: The unique identifier of the comparison
+        
+    Returns:
+        ComparisonResponse with the comparison data
+        
+    Raises:
+        HTTPException: If comparison is not found
+    """
+    try:
+        async with SessionLocal() as session:
+            result = await session.get(Comparison, comp_id)
+            if result is None:
+                raise HTTPException(status_code=404, detail=f"Comparison with ID {comp_id} not found")
+            
+            return ComparisonResponse(
+                id=result.id,
+                correlation=result.correlation_score,  # Stored as percentage
+                chi_square=result.chi_square_score,    # Stored as decimal (distance metric)
+                bhattacharyya=result.bhattacharyya_score,  # Stored as percentage
+                diff_image_url=build_diff_url(Path(result.diff_image_path)),
+                created_at=result.created_at,
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Failed to retrieve comparison {comp_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve comparison: {str(e)}")
+
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)

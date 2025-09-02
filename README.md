@@ -29,3 +29,7 @@
 - Histogram pixel comparison - simple and intuitive approach appropriate for the time constraints
 - Could move on to feature-based comparison such as a CNN if more time.
 - Task pipelining + `.venv` environment for easy dependency and workflow management
+- Unit tests for every function to ensure stability and generalisation capability
+- Checked comparison of different image filetypes didn't affect the comparison score significantly
+- A threshold of 50% difference and a minimum pixel region size of 50 yielded good segmentation performance
+- Blue channel comparison showed similar results to comparing the mean of all three channels

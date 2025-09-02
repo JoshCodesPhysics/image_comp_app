@@ -35,3 +35,33 @@ tasks:
       - sudo docker stop image_diff_db || true
       - pkill -f "uvicorn app:app" || true
       - echo "All services stopped"
+
+  test:
+    desc: Run all test functions
+    deps: [install]
+    cmds:
+      - .venv/bin/python test_functions.py
+
+  test:spatial:
+    desc: Run spatial region difference analysis tests only
+    deps: [install]
+    cmds:
+      - .venv/bin/python -c "from test_functions import test_spatial_difference_regions; test_spatial_difference_regions()"
+
+  test:formats:
+    desc: Run image format comparison tests only
+    deps: [install]
+    cmds:
+      - .venv/bin/python -c "from test_functions import test_image_formats; test_image_formats()"
+
+  test:quick:
+    desc: Run quick tests (database, image reading, histograms)
+    deps: [install]
+    cmds:
+      - .venv/bin/python -c "from test_functions import test_database_initialization, test_image_reading, test_channel_histogram; test_database_initialization(); test_image_reading(); test_channel_histogram()"
+
+  test:url:
+    desc: Run build_diff_url tests only
+    deps: [install]
+    cmds:
+      - .venv/bin/python -c "from test_functions import test_build_diff_url; test_build_diff_url()"

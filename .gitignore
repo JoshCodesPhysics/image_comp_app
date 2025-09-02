@@ -3,3 +3,5 @@ frontend_app_example.py
 app_example.py
 __pycache__/
 .venv
+*_regions*.png
+static/
