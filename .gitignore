@@ -1,0 +1,5 @@
+backend_app_example.py
+frontend_app_example.py
+app_example.py
+__pycache__/
+.venv

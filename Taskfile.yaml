@@ -1,0 +1,37 @@
+version: '3'
+
+tasks:
+  install:
+    desc: Setup Python venv and install dependencies
+    cmds:
+      - python3.10 -m venv .venv
+      - .venv/bin/pip install --upgrade pip
+      - .venv/bin/pip install -r requirements.txt
+
+  postgres:start:
+    desc: Start Postgres via Docker
+    cmds:
+      - sudo docker run --rm -d --name image_diff_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=image_diff -p 5432:5432 postgres:15
+
+  postgres:stop:
+    desc: Stop Postgres container
+    cmds:
+      - sudo docker stop image_diff_db || true
+
+  server:
+    desc: Start FastAPI server with uvicorn
+    cmds:
+      - .venv/bin/uvicorn app:app --reload --host 0.0.0.0 --port 8000
+
+  startup:
+    desc: Start Postgres + FastAPI (watch mode)
+    deps: [postgres:start, install]
+    cmds:
+      - task server
+
+  shutdown:
+    desc: Stop all services (Postgres + any running processes)
+    cmds:
+      - sudo docker stop image_diff_db || true
+      - pkill -f "uvicorn app:app" || true
+      - echo "All services stopped"
