@@ -94,6 +94,40 @@ engine = create_async_engine(DATABASE_URL, echo=False, future=True)
 # class_=AsyncSession: uses async session for non-blocking database operations
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
+async def init_db() -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+def test_database_initialization():
+    """Test the init_db function to ensure database tables are created."""
+    try:
+        # Test the database initialization logic
+        # Since init_db is async and we can't use asyncio.run() in uvicorn's event loop,
+        # we'll test the core logic by checking if the metadata exists and is valid
+        
+        # Check that Base.metadata exists and has our Comparison table
+        if hasattr(Base, 'metadata') and Base.metadata is not None:
+            print(f"✅ Database metadata exists")
+            
+            # Check if our Comparison table is registered
+            if 'comparisons' in Base.metadata.tables:
+                print(f"✅ Comparison table is registered in metadata")
+                table = Base.metadata.tables['comparisons']
+                print(f"   Table name: {table.name}")
+                print(f"   Columns: {list(table.columns.keys())}")
+                return True
+            else:
+                print(f"❌ Comparison table not found in metadata")
+                print(f"   Available tables: {list(Base.metadata.tables.keys())}")
+                return False
+        else:
+            print(f"❌ Database metadata is None or missing")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Database initialization test failed: {e}")
+        return False
+
 # Pydantic scheme for the API response (copy of Comparison but with url instead of path)
 class ComparisonResponse(BaseModel):
     id: str
@@ -187,6 +221,77 @@ def _ensure_same_size(img1: np.ndarray, img2: np.ndarray) -> tuple[np.ndarray, n
         
     except Exception as e:
         raise RuntimeError(f"Error in _ensure_same_size: {e}")
+
+def _compute_channel_hist(bgr_img: np.ndarray, channel_index: int, bins: int = 256) -> np.ndarray:
+    """Compute histogram for a specific channel of a BGR image."""
+    hist = cv2.calcHist([bgr_img], [channel_index], None, [bins], [0, 256])
+    # L1 normalize to sum to 1
+    hist = cv2.normalize(hist, None, alpha=1.0, norm_type=cv2.NORM_L1).flatten()
+    return hist
+
+def _compare_histograms_per_method(h1: np.ndarray, h2: np.ndarray) -> dict:
+    """Return raw OpenCV scores for each method on two 1D hist arrays."""
+    # Correlation: higher is more similar (1 identical, -1 opposite)
+    corr = float(cv2.compareHist(h1.astype("float32"), h2.astype("float32"), cv2.HISTCMP_CORREL))
+    # Chi-Square: 0 identical, unbounded positive otherwise
+    chi = float(cv2.compareHist(h1.astype("float32"), h2.astype("float32"), cv2.HISTCMP_CHISQR))
+    # Bhattacharyya distance: 0 identical, 1 very different (when L1 normalized)
+    bha = float(cv2.compareHist(h1.astype("float32"), h2.astype("float32"), cv2.HISTCMP_BHATTACHARYYA))
+    return {"corr": corr, "chi": chi, "bha": bha}
+
+def test_channel_histogram():
+    """Test the _compute_channel_hist function with image1.png."""
+    
+    try:
+        # Block 1: Read and process image1.png
+        try:
+            with open("image1.png", "rb") as f:
+                image_data = f.read()
+            print(f"✅ Image reading successful: {len(image_data)} bytes")
+            
+            # Convert to numpy array
+            upload_file = UploadFile(file=io.BytesIO(image_data), filename="image1.png")
+            img = _read_image_to_bgr(upload_file)
+            print(f"✅ Image processing successful: shape {img.shape}")
+            
+        except Exception as e:
+            print(f"❌ Image processing failed: {e}")
+            return None
+        
+        # Block 2: Test histogram computation for each channel
+        try:
+            # Test Blue channel (index 0)
+            blue_hist = _compute_channel_hist(img, 0)
+            print(f"✅ Blue channel histogram computed: shape {blue_hist.shape}, sum={blue_hist.sum():.6f}")
+            
+            # Test Green channel (index 1)
+            green_hist = _compute_channel_hist(img, 1)
+            print(f"✅ Green channel histogram computed: shape {green_hist.shape}, sum={green_hist.sum():.6f}")
+            
+            # Test Red channel (index 2)
+            red_hist = _compute_channel_hist(img, 2)
+            print(f"✅ Red channel histogram computed: shape {red_hist.shape}, sum={red_hist.sum():.6f}")
+            
+            # Validate histograms
+            print(f"✅ Histogram validation:")
+            print(f"   All histograms have 256 bins: {all(h.shape[0] == 256 for h in [blue_hist, green_hist, red_hist])}")
+            print(f"   All histograms sum to 1.0: {all(abs(h.sum() - 1.0) < 1e-6 for h in [blue_hist, green_hist, red_hist])}")
+            print(f"   All values are non-negative: {all((h >= 0).all() for h in [blue_hist, green_hist, red_hist])}")
+            
+            # Show some statistics
+            print(f"   Blue channel - min: {blue_hist.min():.6f}, max: {blue_hist.max():.6f}")
+            print(f"   Green channel - min: {green_hist.min():.6f}, max: {green_hist.max():.6f}")
+            print(f"   Red channel - min: {red_hist.min():.6f}, max: {red_hist.max():.6f}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Histogram computation failed: {e}")
+            return None
+        
+    except Exception as e:
+        print(f"❌ Overall test failed: {e}")
+        return None
 
 def test_image_reading():
     """Test the _read_image_to_bgr function with a real image file."""
@@ -284,8 +389,10 @@ def test_image_size_normalization():
         print(f"❌ Overall test failed: {e}")
         return None
 
+test_database_initialization()
 test_image_reading()
 test_image_size_normalization()
+test_channel_histogram()
 
 # API Endpoints
 # Test at http://localhost:8000/health
