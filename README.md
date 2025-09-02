@@ -21,7 +21,15 @@
 
 ## Or everything in one go
 
-`task dev`
+`task startup`
+
+## For shutting down
+
+`task shutdown`
+
+## and for testing
+
+`task test`
 
 # Design choices
 
