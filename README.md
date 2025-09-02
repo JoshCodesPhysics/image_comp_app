@@ -33,3 +33,4 @@
 - Checked comparison of different image filetypes didn't affect the comparison score significantly
 - A threshold of 50% difference and a minimum pixel region size of 50 yielded good segmentation performance
 - Blue channel comparison showed similar results to comparing the mean of all three channels
+- If I had more time I would do some load and memory testing
