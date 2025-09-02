@@ -18,11 +18,13 @@ Implementation Notes:
 import os
 import uuid
 import math
+import io
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import cv2
+import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -101,6 +103,203 @@ class ComparisonResponse(BaseModel):
     diff_image_url: str
     created_at: datetime
 
+# UploadFile contains file object, name, content type (image/jpeg, image/png etc.), file size in bytes
+def _read_image_to_bgr(upload: UploadFile) -> np.ndarray:
+    """Read an UploadFile into an OpenCV BGR image with comprehensive validation."""
+    # Check file size (prevent extremely large files)
+    if hasattr(upload, 'size') and upload.size and upload.size > 50 * 1024 * 1024:  # 50MB limit
+        raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+    
+    # Check content type for basic validation
+    if upload.content_type and not upload.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail=f"Invalid file type: {upload.content_type}. Expected image file.")
+    
+    try:
+        # Returns raw bytes
+        data = upload.file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed reading file: {e}")
+    
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file upload")
+    
+    # Check minimum file size (prevent empty or very small files)
+    if len(data) < 100:  # Minimum 100 bytes for a valid image
+        raise HTTPException(status_code=400, detail="File too small to be a valid image")
+    
+    try:
+        # Convert raw bytes to numpy array
+        nparr = np.frombuffer(data, np.uint8)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to convert file data to image array: {e}")
+    
+    # 3D matrix of pixels (height, width, colour channels)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(status_code=400, detail="Invalid image format or corrupted image data")
+    
+    # Check if image has valid dimensions
+    if img.shape[0] == 0 or img.shape[1] == 0:
+        raise HTTPException(status_code=400, detail="Image has invalid dimensions")
+    
+    # Check if image has the expected 3 channels (BGR)
+    if len(img.shape) != 3 or img.shape[2] != 3:
+        raise HTTPException(status_code=400, detail="Image must be a color image with 3 channels (BGR)")
+    
+    return img
+
+def _ensure_same_size(img1: np.ndarray, img2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Resize img2 to img1's size if different, preserving aspect via direct resize."""
+    try:
+        # Validate input arrays
+        if img1 is None or img2 is None:
+            raise ValueError("One or both images are None")
+        
+        if len(img1.shape) != 3 or len(img2.shape) != 3:
+            raise ValueError("Images must be 3D arrays (height, width, channels)")
+        
+        # Get dimensions
+        h1, w1 = img1.shape[:2]
+        h2, w2 = img2.shape[:2]
+        
+        # Validate dimensions
+        if h1 is None or w1 is None or h2 is None or w2 is None:
+            raise ValueError("Image dimensions are None")
+        
+        if h1 <= 0 or w1 <= 0 or h2 <= 0 or w2 <= 0:
+            raise ValueError("Image dimensions must be positive")
+        
+        # If same size, return as-is
+        if (h1, w1) == (h2, w2):
+            return img1, img2
+        
+        # Resize img2 to match img1's dimensions
+        try:
+          resized = cv2.resize(img2, (w1, h1), interpolation=cv2.INTER_AREA)
+        except Exception as e:
+            raise RuntimeError(f"Error in cv2.resize: {e}")
+        
+        # Validate resize result
+        if resized is None:
+            raise RuntimeError("cv2.resize returned None")
+        
+        return img1, resized
+        
+    except Exception as e:
+        raise RuntimeError(f"Error in _ensure_same_size: {e}")
+
+def test_image_reading():
+    """Test the _read_image_to_bgr function with a real image file."""
+    
+    try:
+        try:
+            with open("image1.png", "rb") as f:
+                image_data = f.read()
+            print(f"✅ File reading successful: {len(image_data)} bytes")
+        except Exception as e:
+            print(f"❌ File reading failed: {e}")
+            return None
+        
+        try:
+            upload_file = UploadFile(
+                file=io.BytesIO(image_data),
+                filename="image1.png"
+            )
+            print(f"✅ UploadFile creation successful: {upload_file.filename}")
+        except Exception as e:
+            print(f"❌ UploadFile creation failed: {e}")
+            return None
+        
+        try:
+            img = _read_image_to_bgr(upload_file)
+            print(f"✅ Image processing successful!")
+            print(f"   Image shape: {img.shape}")
+            print(f"   Image dtype: {img.dtype}")
+            print(f"   Image size: {len(image_data)} bytes")
+            print(f"   Filename: {upload_file.filename}")
+            return img
+        except Exception as e:
+            print(f"❌ Image processing failed: {e}")
+            return None
+        
+    except Exception as e:
+        print(f"❌ Overall test failed: {e}")
+        return None
+
+# Test the _ensure_same_size function with both images
+def test_image_size_normalization():
+    """Test the _ensure_same_size function with image1.png and image2.png."""
+    
+    try:
+        # Block 1: Read image1.png
+        try:
+            with open("image1.png", "rb") as f:
+                image1_data = f.read()
+            print(f"✅ Image1 reading successful: {len(image1_data)} bytes")
+        except Exception as e:
+            print(f"❌ Image1 reading failed: {e}")
+            return None
+        
+        # Block 2: Read image2.png
+        try:
+            with open("image2.png", "rb") as f:
+                image2_data = f.read()
+            print(f"✅ Image2 reading successful: {len(image2_data)} bytes")
+        except Exception as e:
+            print(f"❌ Image2 reading failed: {e}")
+            return None
+        
+        # Block 3: Convert both to numpy arrays using _read_image_to_bgr logic
+        try:
+            # Convert image1
+            upload_file1 = UploadFile(file=io.BytesIO(image1_data), filename="image1.png")
+            img1 = _read_image_to_bgr(upload_file1)
+            print(f"✅ Image1 processing successful: shape {img1.shape}")
+            
+            # Convert image2
+            upload_file2 = UploadFile(file=io.BytesIO(image2_data), filename="image2.png")
+            img2 = _read_image_to_bgr(upload_file2)
+            print(f"✅ Image2 processing successful: shape {img2.shape}")
+            
+        except Exception as e:
+            print(f"❌ Image processing failed: {e}")
+            return None
+        
+        # Block 4: Test _ensure_same_size function
+        try:
+            img1_resized, img2_resized = _ensure_same_size(img1, img2)
+            print(f"✅ Size normalization successful!")
+            print(f"   Original img1 shape: {img1.shape}")
+            print(f"   Original img2 shape: {img2.shape}")
+            print(f"   Resized img1 shape: {img1_resized.shape}")
+            print(f"   Resized img2 shape: {img2_resized.shape}")
+            print(f"   Images now have same dimensions: {img1_resized.shape == img2_resized.shape}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Size normalization failed: {e}")
+            return None
+        
+    except Exception as e:
+        print(f"❌ Overall test failed: {e}")
+        return None
+
+test_image_reading()
+test_image_size_normalization()
+
+# API Endpoints
+# Test at http://localhost:8000/health
+@app.get("/health")
+async def health():
+    """Simple connectivity test to Postgres"""
+    try:
+        async with engine.connect() as conn:
+            # Execute a simple query to verify the connection
+            await conn.execute(text("SELECT 1"))
+        db = "ok"
+    except Exception as e:
+        db = f"error: {e}"
+    return {"status": "ok", "db": db}
+
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
