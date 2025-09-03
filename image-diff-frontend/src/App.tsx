@@ -2,12 +2,15 @@ import { useState, useEffect } from 'react'
 import './App.css'
 import type { Comparison } from './types'
 import UploadForm from './UploadForm'
+import ComparisonViewer from './ComparisonViewer'
+import HistoryList from './HistoryList'
 
 export default function App() {
   const [currentComparison, setCurrentComparison] = useState<Comparison | null>(null)
   const [history, setHistory] = useState<Comparison[]>([])
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
+  const [sliderValue, setSliderValue] = useState(5)
 
   // Load comparison history from localStorage
   // useEffect takes a function and a dependency array (like a lambda in python)
@@ -58,6 +61,9 @@ export default function App() {
 
       const getData = await getRes.json()
 
+
+      const backend_url = "http://localhost:8000"
+
       const newComparison: Comparison = {
         id: getData.id,
         createdAt: getData.created_at,
@@ -68,7 +74,9 @@ export default function App() {
           chiSquare: getData.chi_square,
           bhattacharyya: getData.bhattacharyya,
         },
-        diffImages: getData.diff_image_urls,
+        diffImages: Object.fromEntries(
+          Object.entries(getData.diff_image_urls).map(([k, v]) => [Number(k), backend_url + v])
+        ),
       }
 
       // Update state
@@ -91,15 +99,20 @@ export default function App() {
 
       <UploadForm onSubmit={handleUpload} />
 
+      <HistoryList
+        history={history}
+        onSelect={setCurrentComparison}
+      />
+
       {loading && <p className="text-center text-blue-500">Processing...</p>}
       {error && <p className="text-center text-red-500">{error}</p>}
 
       {currentComparison && (
-        // 1.5 rem top margin
-        <div className="mt-6 p-4 bg-white rounded-lg shadow">
-          <h2 className="text-lg font-semibold mb-2">Upload Successful!</h2>
-          <p>Comparison ID: {currentComparison.id}</p>
-        </div>
+        <ComparisonViewer
+          comparison={currentComparison}
+          sliderValue={sliderValue}
+          setSliderValue={setSliderValue}
+        />
       )}
     </div>
   )
