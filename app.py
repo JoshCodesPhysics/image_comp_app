@@ -19,8 +19,10 @@ import os
 import uuid
 import math
 import io
+import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import cv2
@@ -75,7 +77,8 @@ class Comparison(Base):
     correlation_score: Mapped[float] = mapped_column(Float, nullable=False)
     chi_square_score: Mapped[float] = mapped_column(Float, nullable=False)
     bhattacharyya_score: Mapped[float] = mapped_column(Float, nullable=False)
-    diff_image_path: Mapped[str] = mapped_column(String, nullable=False)
+    # Store JSON string of diff image paths with their thresholds
+    diff_image_paths: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
 
 # Create async database engine - handles connection pool to PostgreSQL
@@ -94,13 +97,14 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-# Pydantic scheme for the API response (copy of Comparison but with url instead of path)
+# Pydantic scheme for the API response (copy of Comparison but with urls instead of paths)
 class ComparisonResponse(BaseModel):
     id: str
     correlation: float = Field(..., ge=0, le=100)
     chi_square: float = Field(..., ge=0, le=100)
     bhattacharyya: float = Field(..., ge=0, le=100)
-    diff_image_url: str
+    # Dictionary mapping threshold values to diff image URLs
+    diff_image_urls: dict[int, str]
     created_at: datetime
 
 # UploadFile contains file object, name, content type (image/jpeg, image/png etc.), file size in bytes
@@ -536,20 +540,29 @@ async def create_comparison(file1: UploadFile = File(...), file2: UploadFile = F
         
         print(f"✅ Scores converted: corr={correlation_percent:.2f}%, chi={chi_square_score:.6f} (distance), bha={bhattacharyya_percent:.2f}%")
         
-        # Find difference regions and create visualization
-        regions_info = _find_difference_regions(img1, img2, threshold=50.0, min_region_size=50)
-        diff_img = _create_difference_visualization(img1, img2, regions_info)
-        
-        diff_filename = f"comparison_{comp_id}.png"
-        diff_path = DIFF_DIR / diff_filename
+        thresholds = list(range(5, 70, 5))
+        diff_image_paths = {}
         
         DIFF_DIR.mkdir(parents=True, exist_ok=True)
         
-        success = cv2.imwrite(str(diff_path), diff_img)
-        if not success:
-            raise HTTPException(status_code=500, detail=f"Failed to save difference image to {diff_path}")
+        for threshold in thresholds:
+            print(f"🔄 Generating diff image for threshold {threshold}...")
+            
+            # Find difference regions and create visualization for this threshold
+            regions_info = _find_difference_regions(img1, img2, threshold=float(threshold), min_region_size=50)
+            diff_img = _create_difference_visualization(img1, img2, regions_info)
+            
+            diff_filename = f"comparison_{comp_id}_threshold_{threshold}.png"
+            diff_path = DIFF_DIR / diff_filename
+            
+            success = cv2.imwrite(str(diff_path), diff_img)
+            if not success:
+                raise HTTPException(status_code=500, detail=f"Failed to save difference image to {diff_path}")
+            
+            diff_image_paths[threshold] = str(diff_path)
+            print(f"✅ Difference image saved for threshold {threshold}: {diff_path}")
         
-        print(f"✅ Difference image saved: {diff_path}")
+        print(f"✅ Generated {len(thresholds)} difference images")
         
         async with SessionLocal() as session:
             entity = Comparison(
@@ -557,7 +570,7 @@ async def create_comparison(file1: UploadFile = File(...), file2: UploadFile = F
                 correlation_score=correlation_percent,
                 chi_square_score=chi_square_score,
                 bhattacharyya_score=bhattacharyya_percent,
-                diff_image_path=str(diff_path),
+                diff_image_paths=json.dumps(diff_image_paths),
                 created_at=created_at,
             )
             session.add(entity)
@@ -565,13 +578,16 @@ async def create_comparison(file1: UploadFile = File(...), file2: UploadFile = F
         
         print(f"✅ Comparison saved to database: {comp_id}")
         
+        # Convert paths to URLs for response
+        diff_image_urls = {threshold: build_diff_url(Path(path)) for threshold, path in diff_image_paths.items()}
+        
         # Return response
         return ComparisonResponse(
             id=comp_id,
             correlation=correlation_percent,
             chi_square=chi_square_score,
             bhattacharyya=bhattacharyya_percent,
-            diff_image_url=build_diff_url(diff_path),
+            diff_image_urls=diff_image_urls,
             created_at=created_at,
         )
         
@@ -602,12 +618,17 @@ async def get_comparison(comp_id: str):
             if result is None:
                 raise HTTPException(status_code=404, detail=f"Comparison with ID {comp_id} not found")
             
+            # Parse the JSON string of diff image paths
+            diff_image_paths = json.loads(result.diff_image_paths)
+            # Convert paths to URLs for response
+            diff_image_urls = {int(threshold): build_diff_url(Path(path)) for threshold, path in diff_image_paths.items()}
+            
             return ComparisonResponse(
                 id=result.id,
                 correlation=result.correlation_score,  # Stored as percentage
                 chi_square=result.chi_square_score,    # Stored as decimal (distance metric)
                 bhattacharyya=result.bhattacharyya_score,  # Stored as percentage
-                diff_image_url=build_diff_url(Path(result.diff_image_path)),
+                diff_image_urls=diff_image_urls,
                 created_at=result.created_at,
             )
             
