@@ -29,6 +29,10 @@ export default function UploadForm({ onSubmit }: UploadFormSets) {
         onSubmit(beforeFile, afterFile)
     }
 
+    // Hook (function with persistent 'use' variable states called at top level of component or other hooks, that can trigger a re-render) from react-dropzone
+    // Inputs indicate to call beforeDrop (set the before file) when a file is dropped (image only accepted)
+    // Returns the properties (members of an object) getRootProps:
+    // used to handle the drop, drag, click events for the before image,and getInputProps: used to handle the input type, number of inputs, file selection, display style
     const {
         getRootProps: getBeforeRoot,
         getInputProps: getBeforeInput
@@ -40,14 +44,17 @@ export default function UploadForm({ onSubmit }: UploadFormSets) {
     } = useDropzone({ onDrop: afterDrop, accept: { "image/*": [] } })
 
   return (
+    // Tailwind CSS div element with 1.5 rem botom margin, flexible container for child element arrangement, stack elements vertically, 1 rem (16px) gap between elements
     <div className="mb-6 flex flex-col items-center gap-4">
       {/* Before Image Dropzone */}
       <div
         {...getBeforeRoot()}
+        // Tailwind CSS div element with 16 rem width, 8 rem height, 2px dashed border, gray-400 color, rounded corners, flex container for alignment, center children horizontally and vertically, cursor pointer, background color white, hover effect changes border color to blue-500
         className="w-64 h-32 border-2 border-dashed border-gray-400 rounded-lg flex items-center justify-center cursor-pointer bg-white hover:border-blue-500"
       >
         <input {...getBeforeInput()} />
         {beforeFile ? (
+            // Tailwind CSS p element with 0.875 rem font size, gray-700 color
           <p className="text-sm text-gray-700">{beforeFile.name}</p>
         ) : (
           <p className="text-gray-500">Drop Before Image here</p>
@@ -67,72 +74,14 @@ export default function UploadForm({ onSubmit }: UploadFormSets) {
         )}
       </div>
 
-             {/* Submit Button */}
-       <button
-         onClick={handleSubmit}
-         disabled={!beforeFile || !afterFile}
-         className={`px-6 py-2 rounded-lg shadow transition-colors ${
-           beforeFile && afterFile
-             ? 'bg-blue-500 text-white hover:bg-blue-600'
-             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-         }`}
-       >
-         Submit
-       </button>
-
-       {/* File Information Display */}
-       {(beforeFile || afterFile) && (
-         <div className="mt-6 w-full max-w-2xl">
-           <h3 className="text-lg font-semibold mb-4 text-center">File Information</h3>
-           
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-             {/* Before File Info */}
-             {beforeFile && (
-               <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                 <h4 className="font-semibold text-green-800 mb-2">Before Image</h4>
-                 <div className="space-y-1 text-sm">
-                   <p><strong>Name:</strong> {beforeFile.name}</p>
-                   <p><strong>Size:</strong> {(beforeFile.size / 1024 / 1024).toFixed(2)} MB</p>
-                   <p><strong>Type:</strong> {beforeFile.type}</p>
-                   <p><strong>Last Modified:</strong> {new Date(beforeFile.lastModified).toLocaleString()}</p>
-                   <p><strong>Size (bytes):</strong> {beforeFile.size.toLocaleString()}</p>
-                 </div>
-               </div>
-             )}
-
-             {/* After File Info */}
-             {afterFile && (
-               <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                 <h4 className="font-semibold text-blue-800 mb-2">After Image</h4>
-                 <div className="space-y-1 text-sm">
-                   <p><strong>Name:</strong> {afterFile.name}</p>
-                   <p><strong>Size:</strong> {(afterFile.size / 1024 / 1024).toFixed(2)} MB</p>
-                   <p><strong>Type:</strong> {afterFile.type}</p>
-                   <p><strong>Last Modified:</strong> {new Date(afterFile.lastModified).toLocaleString()}</p>
-                   <p><strong>Size (bytes):</strong> {afterFile.size.toLocaleString()}</p>
-                 </div>
-               </div>
-             )}
-           </div>
-
-           {/* Comparison Summary */}
-           {beforeFile && afterFile && (
-             <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-               <h4 className="font-semibold text-gray-800 mb-2">Comparison Summary</h4>
-               <div className="grid grid-cols-2 gap-4 text-sm">
-                 <div>
-                   <p><strong>Total Size:</strong> {((beforeFile.size + afterFile.size) / 1024 / 1024).toFixed(2)} MB</p>
-                   <p><strong>Size Difference:</strong> {((afterFile.size - beforeFile.size) / 1024 / 1024).toFixed(2)} MB</p>
-                 </div>
-                 <div>
-                   <p><strong>Same Type:</strong> {beforeFile.type === afterFile.type ? 'Yes' : 'No'}</p>
-                   <p><strong>Same Name:</strong> {beforeFile.name === afterFile.name ? 'Yes' : 'No'}</p>
-                 </div>
-               </div>
-             </div>
-           )}
-         </div>
-       )}
-     </div>
-   )
+      {/* Submit Button */}
+      <button
+        onClick={handleSubmit}
+        // Tailwind CSS button element with blue-500 background, white text, LR 1.5rem padding, UD 0.5rem padding, rounded corners, shadow, hover effect changes background color to blue-600
+        className="bg-blue-500 text-white px-6 py-2 rounded-lg shadow hover:bg-blue-600"
+      >
+        Submit
+      </button>
+    </div>
+  )
 }

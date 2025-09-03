@@ -60,4 +60,5 @@
 - React + Vite for simplicity and faster build time -> avoid hand-writing CSS styling (more ergonomic)
 - Tailwind for UI for easy component composition
 - Save comparison history to localstorage in frontend (persists between pages refreshes) rather than using backend (need extra logic to prevent users from accessing other user's history, more complicated)
-- Modular hierarchy -> root app component stores UploadForm component that does post/get to backend and feeds comparison data dowstream to HistoryList and ComparisonViewer, which stores images, diffs + slider, diff scores.
+- Modular hierarchy -> root app component stores UploadForm component that does post/get to backend and feeds comparison data dowstream to HistoryList and ComparisonViewer, which stores images, diffs + library slider, diff scores.
+- Drag and drop file upload boxes for QOL 

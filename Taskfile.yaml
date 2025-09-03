@@ -1,26 +1,29 @@
 version: '3'
 
 tasks:
-  check-versions:
-    desc: Check if required Python and Node.js versions are installed
+  check-python:
+    desc: Check if required Python version is installed
     cmds:
       - |
-        echo "🔍 Checking system requirements..."
-        echo ""
+        echo "🔍 Checking Python requirements..."
         echo "Python version check:"
         python3.10 --version | grep -E "Python 3\.(1[0-9]|[2-9][0-9])" && echo "✅ Python 3.10+ found" || (echo "❌ Python 3.10+ required. Current: $(python3.10 --version 2>/dev/null || echo 'not found')" && exit 1)
-        echo ""
+        echo "✅ Python requirements met!"
+
+  check-node:
+    desc: Check if required Node.js and npm are installed
+    cmds:
+      - |
+        echo "🔍 Checking Node.js requirements..."
         echo "Node.js version check:"
         node --version | grep -E "v(2[0-9]|[3-9][0-9])" && echo "✅ Node.js 20+ found" || (echo "❌ Node.js 20+ required. Current: $(node --version 2>/dev/null || echo 'not found')" && exit 1)
-        echo ""
         echo "npm check:"
         npm --version && echo "✅ npm found" || (echo "❌ npm not found" && exit 1)
-        echo ""
-        echo "🎉 All version requirements met!"
+        echo "✅ Node.js requirements met!"
 
   backend-install:
     desc: Setup Python venv and install dependencies
-    deps: [check-versions]
+    deps: [check-python]
     cmds:
       - echo "📦 Setting up Python virtual environment..."
       - python3.10 -m venv .venv
@@ -30,7 +33,7 @@ tasks:
 
   frontend-install:
     desc: Install frontend dependencies
-    deps: [check-versions]
+    deps: [check-node]
     cmds:
       - echo "📦 Installing frontend dependencies..."
       - cd image-diff-frontend && npm install
@@ -66,13 +69,14 @@ tasks:
 
   startup-full:
     desc: Start all services (Postgres + FastAPI + Frontend)
-    deps: [postgres-start, backend-install, frontend-install]
+    deps: [postgres-start, check-python, check-node]
     cmds:
       - echo "🚀 Starting full application stack..."
       - echo "Backend at http://localhost:8000"
       - echo "Frontend at http://localhost:5173"
       - echo "Press Ctrl+C to stop all services"
-      - task server &
+      - sleep 3
+      - .venv/bin/uvicorn app:app --reload --host 0.0.0.0 --port 8000 &
       - cd image-diff-frontend && npm run dev
 
   shutdown-full:
