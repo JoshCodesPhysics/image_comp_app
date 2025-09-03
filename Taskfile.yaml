@@ -1,19 +1,54 @@
 version: '3'
 
 tasks:
-  install:
-    desc: Setup Python venv and install dependencies
+  check-versions:
+    desc: Check if required Python and Node.js versions are installed
     cmds:
+      - |
+        echo "🔍 Checking system requirements..."
+        echo ""
+        echo "Python version check:"
+        python3.10 --version | grep -E "Python 3\.(1[0-9]|[2-9][0-9])" && echo "✅ Python 3.10+ found" || (echo "❌ Python 3.10+ required. Current: $(python3.10 --version 2>/dev/null || echo 'not found')" && exit 1)
+        echo ""
+        echo "Node.js version check:"
+        node --version | grep -E "v(2[0-9]|[3-9][0-9])" && echo "✅ Node.js 20+ found" || (echo "❌ Node.js 20+ required. Current: $(node --version 2>/dev/null || echo 'not found')" && exit 1)
+        echo ""
+        echo "npm check:"
+        npm --version && echo "✅ npm found" || (echo "❌ npm not found" && exit 1)
+        echo ""
+        echo "🎉 All version requirements met!"
+
+  backend-install:
+    desc: Setup Python venv and install dependencies
+    deps: [check-versions]
+    cmds:
+      - echo "📦 Setting up Python virtual environment..."
       - python3.10 -m venv .venv
       - .venv/bin/pip install --upgrade pip
       - .venv/bin/pip install -r requirements.txt
+      - echo "✅ Python dependencies installed successfully!"
 
-  postgres:start:
+  frontend-install:
+    desc: Install frontend dependencies
+    deps: [check-versions]
+    cmds:
+      - echo "📦 Installing frontend dependencies..."
+      - cd image-diff-frontend && npm install
+      - echo "✅ Frontend dependencies installed successfully!"
+
+  frontend-dev:
+    desc: Start frontend development server
+    deps: [frontend-install]
+    cmds:
+      - echo "🚀 Starting frontend development server..."
+      - cd image-diff-frontend && npm run dev
+
+  postgres-start:
     desc: Start Postgres via Docker
     cmds:
       - sudo docker run --rm -d --name image_diff_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=image_diff -p 5432:5432 postgres:15
 
-  postgres:stop:
+  postgres-stop:
     desc: Stop Postgres container
     cmds:
       - sudo docker stop image_diff_db || true
@@ -25,43 +60,55 @@ tasks:
 
   startup:
     desc: Start Postgres + FastAPI (watch mode)
-    deps: [postgres:start, install]
+    deps: [postgres-start, backend-install]
     cmds:
       - task server
 
-  shutdown:
+  startup-full:
+    desc: Start all services (Postgres + FastAPI + Frontend)
+    deps: [postgres-start, backend-install, frontend-install]
+    cmds:
+      - echo "🚀 Starting full application stack..."
+      - echo "Backend at http://localhost:8000"
+      - echo "Frontend at http://localhost:5173"
+      - echo "Press Ctrl+C to stop all services"
+      - task server &
+      - cd image-diff-frontend && npm run dev
+
+  shutdown-full:
     desc: Stop all services (Postgres + any running processes)
     cmds:
       - sudo docker stop image_diff_db || true
       - pkill -f "uvicorn app:app" || true
+      - pkill -f "vite" || true
       - echo "All services stopped"
 
   test:
     desc: Run all test functions
-    deps: [install]
+    deps: [backend-install]
     cmds:
       - .venv/bin/python test_functions.py
 
-  test:spatial:
+  test-spatial:
     desc: Run spatial region difference analysis tests only
-    deps: [install]
+    deps: [backend-install]
     cmds:
       - .venv/bin/python -c "from test_functions import test_spatial_difference_regions; test_spatial_difference_regions()"
 
-  test:formats:
+  test-formats:
     desc: Run image format comparison tests only
-    deps: [install]
+    deps: [backend-install]
     cmds:
       - .venv/bin/python -c "from test_functions import test_image_formats; test_image_formats()"
 
-  test:quick:
+  test-quick:
     desc: Run quick tests (database, image reading, histograms)
-    deps: [install]
+    deps: [backend-install]
     cmds:
       - .venv/bin/python -c "from test_functions import test_database_initialization, test_image_reading, test_channel_histogram; test_database_initialization(); test_image_reading(); test_channel_histogram()"
 
-  test:url:
+  test-url:
     desc: Run build_diff_url tests only
-    deps: [install]
+    deps: [backend-install]
     cmds:
       - .venv/bin/python -c "from test_functions import test_build_diff_url; test_build_diff_url()"
