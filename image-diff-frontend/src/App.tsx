@@ -5,6 +5,26 @@ import UploadForm from './UploadForm'
 import ComparisonViewer from './ComparisonViewer'
 import HistoryList from './HistoryList'
 
+
+// Storing base64 previews of image instead of URLS to survive refresh
+const fileToBase64 = (file: File): Promise<string> => {
+// Converts a File object to a base64-encoded data URL string using the FileReader API.
+// Returns a Promise that resolves with the base64 string when the file is successfully read,
+// or rejects if an error occurs during reading.
+// - Promise: Represents the eventual completion (or failure) of an asynchronous operation.
+// - resolve: Called when the file is read successfully, passing the result (base64 string).
+// - reject: Called if an error occurs while reading the file.
+// - FileReader: A web API that asynchronously reads the contents of files (such as images).
+// - reader.onload: Event handler triggered when the file has been read successfully.
+// - reader.onerror: Event handler triggered if an error occurs during the read operation.
+return new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(reader.result as string)
+  reader.onerror = reject
+  reader.readAsDataURL(file)
+})
+}
+
 export default function App() {
   const [currentComparison, setCurrentComparison] = useState<Comparison | null>(null)
   const [history, setHistory] = useState<Comparison[]>([])
@@ -28,6 +48,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('imageDiffHistory', JSON.stringify(history))
   }, [history])
+
+  const handleClearHistory = () => {
+  setHistory([])
+  localStorage.removeItem("imageDiffHistory")
+  }
 
   const handleUpload = async (beforeFile: File, afterFile: File) => {
     setLoading(true)
@@ -59,24 +84,29 @@ export default function App() {
         throw new Error(`GET failed: ${getRes.status}`)
       }
 
+      // Inside handleUpload, after GET response:
       const getData = await getRes.json()
 
+      const beforeBase64 = await fileToBase64(beforeFile)
+      const afterBase64 = await fileToBase64(afterFile)
 
       const backend_url = "http://localhost:8000"
 
       const newComparison: Comparison = {
         id: getData.id,
         createdAt: getData.created_at,
-        beforeUrl: URL.createObjectURL(beforeFile),
-        afterUrl: URL.createObjectURL(afterFile),
+        beforeUrl: beforeBase64, // base64 instead of blob
+        afterUrl: afterBase64,
         scores: {
           correlation: getData.correlation,
           chiSquare: getData.chi_square,
           bhattacharyya: getData.bhattacharyya,
         },
+        // Object.entries(getData.diff_image_urls) returns an array of [key, value] pairs from the diff_image_urls object.
+        // Object.fromEntries(...) reconstructs an object from these [key, value] pairs after mapping.
         diffImages: Object.fromEntries(
           Object.entries(getData.diff_image_urls).map(([k, v]) => [Number(k), backend_url + v])
-        ),
+        ), 
       }
 
       // Update state
@@ -102,6 +132,7 @@ export default function App() {
       <HistoryList
         history={history}
         onSelect={setCurrentComparison}
+        onClear={handleClearHistory}
       />
 
       {loading && <p className="text-center text-blue-500">Processing...</p>}
