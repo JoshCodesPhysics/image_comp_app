@@ -1,47 +1,43 @@
-import './App.css'
-import { useState } from 'react'
-import { useDropzone } from "react-dropzone"
+import './App.css';
+import { useState } from 'react';
+import { useDropzone } from 'react-dropzone';
 
 type UploadFormSets = {
-    onSubmit : (beforeFile: File, afterFile: File) => void
-}
+  onSubmit: (beforeFile: File, afterFile: File) => void;
+};
 
 export default function UploadForm({ onSubmit }: UploadFormSets) {
-    const [beforeFile, setBeforeFile] = useState<File | null>(null)
-    const [afterFile, setAfterFile] = useState<File | null>(null)
+  const [beforeFile, setBeforeFile] = useState<File | null>(null);
+  const [afterFile, setAfterFile] = useState<File | null>(null);
 
-    const beforeDrop = (acceptedFiles: File[]) => {
-        if (acceptedFiles.length > 0) {
-            setBeforeFile(acceptedFiles[0])
-        }
+  const beforeDrop = (acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      setBeforeFile(acceptedFiles[0]);
+    }
+  };
+
+  const afterDrop = (acceptedFiles: File[]) => {
+    setAfterFile(acceptedFiles[0]);
+  };
+
+  const handleSubmit = () => {
+    if (!beforeFile || !afterFile) {
+      alert('Please upload both before and after images');
+      return;
     }
 
-    const afterDrop = (acceptedFiles: File[]) => {
-        setAfterFile(acceptedFiles[0])
-    }
+    onSubmit(beforeFile, afterFile);
+  };
 
-    const handleSubmit = () => {
-        if (!beforeFile || !afterFile) {
-            alert("Please upload both before and after images")
-            return
-        }
+  // Hook (function with persistent 'use' variable states called at top level of component or other hooks, that can trigger a re-render) from react-dropzone
+  // Inputs indicate to call beforeDrop (set the before file) when a file is dropped (image only accepted)
+  // Returns the properties (members of an object) getRootProps:
+  // used to handle the drop, drag, click events for the before image,and getInputProps: used to handle the input type, number of inputs, file selection, display style
+  const { getRootProps: getBeforeRoot, getInputProps: getBeforeInput } =
+    useDropzone({ onDrop: beforeDrop, accept: { 'image/*': [] } });
 
-        onSubmit(beforeFile, afterFile)
-    }
-
-    // Hook (function with persistent 'use' variable states called at top level of component or other hooks, that can trigger a re-render) from react-dropzone
-    // Inputs indicate to call beforeDrop (set the before file) when a file is dropped (image only accepted)
-    // Returns the properties (members of an object) getRootProps:
-    // used to handle the drop, drag, click events for the before image,and getInputProps: used to handle the input type, number of inputs, file selection, display style
-    const {
-        getRootProps: getBeforeRoot,
-        getInputProps: getBeforeInput
-    } = useDropzone({ onDrop: beforeDrop, accept: { "image/*": [] } })
-
-    const {
-        getRootProps: getAfterRoot,
-        getInputProps: getAfterInput
-    } = useDropzone({ onDrop: afterDrop, accept: { "image/*": [] } })
+  const { getRootProps: getAfterRoot, getInputProps: getAfterInput } =
+    useDropzone({ onDrop: afterDrop, accept: { 'image/*': [] } });
 
   return (
     // Tailwind CSS div element with 1.5 rem botom margin, flexible container for child element arrangement, stack elements vertically, 1 rem (16px) gap between elements
@@ -54,7 +50,7 @@ export default function UploadForm({ onSubmit }: UploadFormSets) {
       >
         <input {...getBeforeInput()} />
         {beforeFile ? (
-            // Tailwind CSS p element with 0.875 rem font size, gray-700 color
+          // Tailwind CSS p element with 0.875 rem font size, gray-700 color
           <p className="text-sm text-gray-700">{beforeFile.name}</p>
         ) : (
           <p className="text-gray-500">Drop Before Image here</p>
@@ -83,5 +79,5 @@ export default function UploadForm({ onSubmit }: UploadFormSets) {
         Submit
       </button>
     </div>
-  )
+  );
 }

@@ -1,7 +1,11 @@
-import type { HistoryListProps } from './types/history_list'
+import type { HistoryListProps } from './types/history_list';
 
-export default function HistoryList({ history, onSelect, onClear }: HistoryListProps) {
-  if (history.length === 0) return null
+export default function HistoryList({
+  history,
+  onSelect,
+  onClear,
+}: HistoryListProps) {
+  if (history.length === 0) return null;
 
   return (
     <div className="mb-6">
@@ -16,7 +20,7 @@ export default function HistoryList({ history, onSelect, onClear }: HistoryListP
       </div>
 
       <ul className="space-y-2">
-        {history.map(c => (
+        {history.map((c) => (
           <li key={c.id}>
             <button
               onClick={() => onSelect(c)}
@@ -28,5 +32,5 @@ export default function HistoryList({ history, onSelect, onClear }: HistoryListP
         ))}
       </ul>
     </div>
-  )
+  );
 }

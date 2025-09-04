@@ -112,6 +112,22 @@ tasks:
     cmds:
       - .venv/bin/python test_functions.py
 
+  format:
+    desc: Format code with Black and Prettier
+    cmds:
+      - echo "🎨 Formatting code..."
+      - .venv/bin/black app.py
+      - cd image-diff-frontend && npm run format
+      - echo "✅ Code formatted successfully!"
+
+  format-check:
+    desc: Check code formatting without making changes
+    cmds:
+      - echo "🔍 Checking code formatting..."
+      - .venv/bin/black --check app.py
+      - cd image-diff-frontend && npm run format:check
+      - echo "✅ Code formatting is correct!"
+
   test-spatial:
     desc: Run spatial region difference analysis tests only
     deps: [backend-install]

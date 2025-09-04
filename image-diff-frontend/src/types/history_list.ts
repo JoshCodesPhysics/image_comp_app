@@ -1,7 +1,7 @@
-import type { Comparison } from './comparison'
+import type { Comparison } from './comparison';
 
 export type HistoryListProps = {
-  history: Comparison[]
-  onSelect: (c: Comparison) => void
-  onClear: () => void
-}
+  history: Comparison[];
+  onSelect: (c: Comparison) => void;
+  onClear: () => void;
+};

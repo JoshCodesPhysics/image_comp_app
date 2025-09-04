@@ -8,3 +8,4 @@ sqlalchemy[asyncio]==2.0.34
 asyncpg==0.29.0
 python-multipart==0.0.9
 python-dotenv==1.0.1
+black==24.10.0

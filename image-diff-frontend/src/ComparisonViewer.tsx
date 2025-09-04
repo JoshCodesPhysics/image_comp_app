@@ -1,7 +1,11 @@
-import { Slider } from "@mui/material"
-import type { ComparisonViewerProps } from "./types/comparison_viewer"
+import { Slider } from '@mui/material';
+import type { ComparisonViewerProps } from './types/comparison_viewer';
 
-export default function ComparisonViewer({ comparison, sliderValue, setSliderValue }: ComparisonViewerProps) {
+export default function ComparisonViewer({
+  comparison,
+  sliderValue,
+  setSliderValue,
+}: ComparisonViewerProps) {
   const thresholds: number[] = [];
   // 5 - 65
   for (const key of Object.keys(comparison.diffImages)) {
@@ -38,8 +42,8 @@ export default function ComparisonViewer({ comparison, sliderValue, setSliderVal
             min={Math.min(...thresholds)}
             max={Math.max(...thresholds)}
             step={5}
-            marks={thresholds.map(t => ({ value: t, label: `${t}` }))}
-            sx={{ width: "90%", marginTop: 2 }}
+            marks={thresholds.map((t) => ({ value: t, label: `${t}` }))}
+            sx={{ width: '90%', marginTop: 2 }}
           />
         </div>
       </div>
@@ -52,6 +56,5 @@ export default function ComparisonViewer({ comparison, sliderValue, setSliderVal
         <p>Bhattacharyya: {comparison.scores.bhattacharyya.toFixed(2)}%</p>
       </div>
     </div>
-  )
+  );
 }
-
