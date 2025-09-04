@@ -57,6 +57,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "image-comparison-backend"}
+
 # Serve static files
 app.mount("/static", StaticFiles(directory=str(STATIC_ROOT)), name="static")
 

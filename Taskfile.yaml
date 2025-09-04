@@ -21,9 +21,32 @@ tasks:
         npm --version && echo "✅ npm found" || (echo "❌ npm not found" && exit 1)
         echo "✅ Node.js requirements met!"
 
+  check-docker:
+    desc: Check if Docker is installed and running
+    cmds:
+      - |
+        echo "🔍 Checking Docker requirements..."
+        docker --version && echo "✅ Docker found" || (echo "❌ Docker required but not found" && exit 1)
+        docker info > /dev/null 2>&1 && echo "✅ Docker daemon running" || (echo "❌ Docker daemon not running" && exit 1)
+
+  check-ports:
+    desc: Check if required ports are available
+    cmds:
+      - |
+        echo "🔍 Checking port availability..."
+        ! lsof -i :5432 > /dev/null 2>&1 && echo "✅ Port 5432 available" || (echo "❌ Port 5432 in use" && exit 1)
+        ! lsof -i :8000 > /dev/null 2>&1 && echo "✅ Port 8000 available" || (echo "❌ Port 8000 in use" && exit 1)
+        ! lsof -i :3000 > /dev/null 2>&1 && echo "✅ Port 3000 available" || (echo "❌ Port 3000 in use" && exit 1)
+
+  check-all:
+    desc: Run all system checks
+    deps: [check-python, check-node, check-docker, check-ports]
+    cmds:
+      - echo "✅ All system requirements met!"
+
   backend-install:
     desc: Setup Python venv and install dependencies
-    deps: [check-python]
+    deps: [check-python, check-docker, check-ports]
     cmds:
       - echo "📦 Setting up Python virtual environment..."
       - python3.10 -m venv .venv
@@ -33,7 +56,7 @@ tasks:
 
   frontend-install:
     desc: Install frontend dependencies
-    deps: [check-node]
+    deps: [check-node, check-ports]
     cmds:
       - echo "📦 Installing frontend dependencies..."
       - cd image-diff-frontend && npm install
@@ -41,7 +64,7 @@ tasks:
 
   frontend-dev:
     desc: Start frontend development server
-    deps: [frontend-install]
+    deps: [frontend-install] 
     cmds:
       - echo "🚀 Starting frontend development server..."
       - cd image-diff-frontend && npm run dev
@@ -61,17 +84,13 @@ tasks:
     cmds:
       - .venv/bin/uvicorn app:app --reload --host 0.0.0.0 --port 8000
 
-  startup:
-    desc: Start Postgres + FastAPI (watch mode)
-    deps: [postgres-start, backend-install]
-    cmds:
-      - task server
-
   startup-full:
     desc: Start all services (Postgres + FastAPI + Frontend)
-    deps: [postgres-start, check-python, check-node]
     cmds:
       - echo "🚀 Starting full application stack..."
+      - task: postgres-start
+      - task: backend-install
+      - task: frontend-install
       - echo "Backend at http://localhost:8000"
       - echo "Frontend at http://localhost:5173"
       - echo "Press Ctrl+C to stop all services"
@@ -116,3 +135,44 @@ tasks:
     deps: [backend-install]
     cmds:
       - .venv/bin/python -c "from test_functions import test_build_diff_url; test_build_diff_url()"
+
+  # Docker tasks
+  docker-build:
+    desc: Build all Docker images
+    cmds:
+      - echo "🐳 Building Docker images..."
+      - docker-compose build
+
+  docker-up:
+    desc: Start all services with Docker Compose
+    cmds:
+      - echo "🚀 Starting all services with Docker..."
+      - docker-compose up -d
+      - echo "Backend - http://localhost:8000"
+      - echo "Frontend - http://localhost:3000"
+      - echo "Database - localhost:5432"
+
+  docker-down:
+    desc: Stop all Docker services
+    cmds:
+      - echo "🛑 Stopping Docker services..."
+      - docker-compose down
+
+  docker-logs:
+    desc: View logs from all services
+    cmds:
+      - docker-compose logs -f
+
+  docker-clean:
+    desc: Clean up Docker containers, images, and volumes
+    cmds:
+      - echo "🧹 Cleaning up Docker resources..."
+      - docker-compose down -v --rmi all
+      - docker system prune -f
+
+  docker-rebuild:
+    desc: Rebuild and restart all services
+    deps: [docker-down]
+    cmds:
+      - task: docker-build
+      - task: docker-up

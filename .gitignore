@@ -10,4 +10,14 @@ static/
 image-diff-frontend/node_modules/
 image-diff-frontend/dist/
 image-diff-frontend/.env.local
+image-diff-frontend/.vite/
 image-diff-frontend/.env.*.local
+
+# Docker and environment files
+docker-compose.override.yml
+.docker/
+
+# Database and logs
+*.log
+*.pid
+postgres_data/

@@ -1,7 +1,7 @@
 import { Slider } from "@mui/material"
-import type { ComparisonViewerSets } from "./types/comparison_viewer"
+import type { ComparisonViewerProps } from "./types/comparison_viewer"
 
-export default function ComparisonViewer({ comparison, sliderValue, setSliderValue }: ComparisonViewerSets) {
+export default function ComparisonViewer({ comparison, sliderValue, setSliderValue }: ComparisonViewerProps) {
   const thresholds: number[] = [];
   // 5 - 65
   for (const key of Object.keys(comparison.diffImages)) {
