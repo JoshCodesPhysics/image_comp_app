@@ -41,10 +41,6 @@ task docker-up
 task docker-down
 ```
 
-# To run:
-
-## Quick Start (Recommended - Docker)
-
 ### Check system requirements
 `task check-all` - Run all system checks (Python, Node.js, Docker, ports)
 
